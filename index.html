@@ -170,6 +170,7 @@ legend small{display:block;font-family:'Manrope',sans-serif;font-weight:500;font
       <button class="tab" role="tab" data-t="col" aria-selected="false">Colores</button>
       <button class="tab" role="tab" data-t="ig" aria-selected="false">Instagram</button>
       <button class="tab" role="tab" data-t="rev" aria-selected="false">Comentarios <span id="revBadge" class="pill s" hidden></span></button>
+      <button class="tab" role="tab" data-t="req" aria-selected="false">Solicitudes <span id="reqBadge" class="pill s" hidden></span></button>
       <button class="tab" role="tab" data-t="set" aria-selected="false">Ajustes</button>
     </div>
 
@@ -244,6 +245,10 @@ legend small{display:block;font-family:'Manrope',sans-serif;font-weight:500;font
       <div class="list" id="revList" style="margin-top:12px"></div>
     </section>
 
+    <section id="p_req" hidden>
+      <p class="msg" id="reqMsg" role="status" style="margin-top:20px"></p>
+      <div class="list" id="reqList" style="margin-top:12px"></div>
+    </section>
     <section id="p_set" hidden>
       <div class="card" style="margin:14px 0;max-width:560px;display:grid;gap:12px">
         <h2>Optimizar fotos existentes</h2>
@@ -384,7 +389,7 @@ async function load(){
   const {data,error}=await sb.from("productos").select("*").order("id",{ascending:false});
   if(error){say("#listMsg","No se pudo cargar: "+error.message,1);return}
   rows=data;say("#listMsg","");render();
-  loadCats();loadBrands();loadColors();loadReels();loadSettings();loadReviews();
+  loadCats();loadBrands();loadColors();loadReels();loadSettings();loadReviews();loadRequests();
 }
 function say(sel,t,err){const m=$(sel);m.textContent=t;m.className="msg"+(t?(err?" err":" ok"):"")}
 let rq=0;function render(){cancelAnimationFrame(rq);rq=requestAnimationFrame(renderNow)}
@@ -605,7 +610,7 @@ $("#form").onsubmit=async e=>{
 $("#tabs").onclick=e=>{
   const t=e.target.dataset.t;if(!t)return;
   document.querySelectorAll(".tab").forEach(b=>b.setAttribute("aria-selected",b===e.target));
-  ["prod","cat","col","ig","rev","set"].forEach(k=>$("#p_"+k).hidden=k!==t);
+  ["prod","cat","col","ig","rev","req","set"].forEach(k=>$("#p_"+k).hidden=k!==t);
 };
 
 /* ---- categorías ---- */
@@ -827,6 +832,37 @@ $("#optBtn").onclick=async()=>{
   }catch(e){say("#optMsg","Error: "+(e.message||e),1)}
   finally{$("#optBtn").disabled=false}
 };
+
+/* ---- solicitudes de referencias ---- */
+async function loadRequests(){
+  const {data,error}=await sb.from("solicitudes").select("*").order("created_at",{ascending:false});
+  if(error)return say("#reqMsg","Falta ejecutar supabase-v10.sql: "+error.message,1);
+  say("#reqMsg","");
+  const n=data.filter(x=>x.status==="nueva").length,bd=$("#reqBadge");bd.hidden=!n;bd.textContent=n;
+  const l=$("#reqList");l.innerHTML="";
+  data.forEach(c=>{
+    const d=document.createElement("div");d.className="rowitem"+(c.status==="atendida"?" off":"");
+    d.innerHTML='<img class="rv-img" alt="" hidden><div class="grow"><b></b> <span class="pill"></span><div class="note"></div><div class="wa"></div></div><div style="display:flex;gap:8px;flex-wrap:wrap;width:100%"></div>';
+    d.querySelector("b").textContent=c.reference;
+    const pl=d.querySelector(".pill");pl.textContent=c.status==="nueva"?"Nueva":"Atendida";if(c.status==="nueva")pl.classList.add("warn");else pl.classList.add("ok");
+    d.querySelector(".note").textContent=new Date(c.created_at).toLocaleString("es-CO");
+    d.querySelector(".wa").textContent="WhatsApp: "+c.whatsapp;
+    if(c.image_url){const i=d.querySelector("img");i.src=c.image_url;i.hidden=false;i.style.cursor="zoom-in";i.onclick=()=>window.open(c.image_url,"_blank")}
+    const act=d.lastElementChild,add=(t,cls,fn)=>{const b=document.createElement(fn?"button":"a");b.className="btn sm "+cls;b.textContent=t;if(fn)b.onclick=fn;act.appendChild(b);return b};
+    const digits=c.whatsapp.replace(/\D/g,""),num=digits.length===10?"57"+digits:digits;
+    const a=add("Escribir por WhatsApp","primary");a.href=`https://wa.me/${num}?text=${encodeURIComponent("¡Hola! Te escribimos de El Profe Store por la referencia que solicitaste: "+c.reference)}`;a.target="_blank";a.rel="noopener";
+    add(c.status==="nueva"?"Marcar atendida":"Reabrir","",async()=>{const {error}=await sb.from("solicitudes").update({status:c.status==="nueva"?"atendida":"nueva"}).eq("id",c.id);error?say("#reqMsg",error.message,1):loadRequests()});
+    add("Eliminar","danger",async()=>{
+      if(!confirm("¿Eliminar esta solicitud? No se puede deshacer."))return;
+      const {error}=await sb.from("solicitudes").delete().eq("id",c.id);
+      if(error)return say("#reqMsg",error.message,1);
+      const m=c.image_url&&c.image_url.match(/\/solicitudes\/([^/?]+)$/);if(m)await sb.storage.from("solicitudes").remove([m[1]]);
+      loadRequests();
+    });
+    l.appendChild(d);
+  });
+  if(!data.length)l.innerHTML='<p class="meta">Aún no hay solicitudes de clientes.</p>';
+}
 
 /* ---- ajustes ---- */
 async function loadSettings(){
